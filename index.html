@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>3D Head with Stable Background</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+        }
+        #container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        #gradient-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            transition: all 2s ease;
+        }
+    </style>
+</head>
+<body>
+    <div id="gradient-container"></div>
+    <div id="container"></div>
+
+    <script>
+        // Set up scene
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.getElementById('container').appendChild(renderer.domElement);
+
+        // Create a basic head geometry
+        const geometry = new THREE.SphereGeometry(2, 32, 32);
+        const material = new THREE.MeshPhongMaterial({ 
+            color: 0xcccccc,
+            flatShading: true
+        });
+        const head = new THREE.Mesh(geometry, material);
+        scene.add(head);
+
+        // Add lighting
+        const light = new THREE.DirectionalLight(0xffffff, 1);
+        light.position.set(5, 5, 5);
+        scene.add(light);
+        const ambientLight = new THREE.AmbientLight(0x404040);
+        scene.add(ambientLight);
+
+        // Position camera
+        camera.position.z = 6;
+
+        // Variables for rotation handling
+        let rotationSpeed = 0;
+        const maxRotationSpeed = 0.15;
+        const damping = 0.98;
+
+        // Color arrays for gradient generation
+        const colorSets = [
+            ['#4A90E2', '#50E3C2'],  // Blue to Turquoise
+            ['#FF6B6B', '#4ECDC4'],  // Coral to Seafoam
+            ['#A8E6CF', '#DCEDC1'],  // Mint to Light Green
+            ['#FFD93D', '#FF6B6B'],  // Yellow to Coral
+            ['#6C5B7B', '#355C7D']   // Purple to Deep Blue
+        ];
+
+        // Gradient handling
+        const gradientContainer = document.getElementById('gradient-container');
+        let currentColorIndex = 0;
+        let accumulatedScroll = 0;
+        let lastUpdateTime = Date.now();
+        
+        function updateGradient(scrollAmount) {
+            // Only update colors if there's significant scroll movement
+            if (Math.abs(scrollAmount) > 50) {
+                // Determine direction of color change
+                const direction = Math.sign(scrollAmount);
+                
+                // Update color index
+                currentColorIndex = (currentColorIndex + direction + colorSets.length) % colorSets.length;
+                
+                // Get current color set
+                const colors = colorSets[currentColorIndex];
+                
+                // Create stable gradient
+                const gradient = `linear-gradient(
+                    45deg,
+                    ${colors[0]} 0%,
+                    ${colors[1]} 100%
+                )`;
+                
+                gradientContainer.style.background = gradient;
+                
+                // Reset accumulated scroll
+                accumulatedScroll = 0;
+            }
+        }
+
+        // Handle wheel events for smooth infinite scrolling
+        let velocity = 0;
+        const velocityDamping = 0.95;
+        const scrollSensitivity = 0.03;
+
+        window.addEventListener('wheel', (event) => {
+            event.preventDefault();
+            velocity += event.deltaY * scrollSensitivity;
+            rotationSpeed = -velocity * 0.003;
+            
+            // Accumulate scroll amount
+            accumulatedScroll += event.deltaY;
+            
+            // Only update gradient if enough time has passed
+            const currentTime = Date.now();
+            if (currentTime - lastUpdateTime > 500) {  // 500ms minimum between updates
+                updateGradient(accumulatedScroll);
+                lastUpdateTime = currentTime;
+            }
+        }, { passive: false });
+
+        // Touch handling for mobile devices
+        let lastTouchY = 0;
+        let touchVelocity = 0;
+
+        window.addEventListener('touchstart', (event) => {
+            lastTouchY = event.touches[0].clientY;
+        }, { passive: false });
+
+        window.addEventListener('touchmove', (event) => {
+            event.preventDefault();
+            const touchY = event.touches[0].clientY;
+            const deltaY = lastTouchY - touchY;
+            lastTouchY = touchY;
+            
+            velocity += deltaY * scrollSensitivity * 2;
+            rotationSpeed = -velocity * 0.003;
+            
+            // Accumulate scroll amount
+            accumulatedScroll += deltaY;
+            
+            // Only update gradient if enough time has passed
+            const currentTime = Date.now();
+            if (currentTime - lastUpdateTime > 500) {
+                updateGradient(accumulatedScroll);
+                lastUpdateTime = currentTime;
+            }
+        }, { passive: false });
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+
+            velocity *= velocityDamping;
+            head.rotation.y += rotationSpeed;
+            rotationSpeed *= damping;
+
+            renderer.render(scene, camera);
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Initialize with first gradient
+        const initialColors = colorSets[0];
+        gradientContainer.style.background = `linear-gradient(
+            45deg,
+            ${initialColors[0]} 0%,
+            ${initialColors[1]} 100%
+        )`;
+        
+        animate();
+    </script>
+</body>
+</html>
