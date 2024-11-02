@@ -3,12 +3,14 @@
 <head>
     <title>⚡️⚡️⚡️</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
     <style>
         body {
             margin: 0;
             overflow: hidden;
             height: 100vh;
             width: 100vw;
+            touch-action: none;
         }
         #container {
             position: fixed;
@@ -16,6 +18,10 @@
             left: 0;
             width: 100%;
             height: 100%;
+            cursor: grab;
+        }
+        #container:active {
+            cursor: grabbing;
         }
         #gradient-container {
             position: fixed;
@@ -26,43 +32,50 @@
             z-index: -1;
             transition: all 2s ease;
         }
+        #error-message {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background: rgba(255, 0, 0, 0.8);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            display: none;
+            z-index: 1000;
+        }
     </style>
 </head>
 <body>
+    <div id="error-message"></div>
     <div id="gradient-container"></div>
     <div id="container"></div>
 
     <script>
-        // Set up scene
+        // Error display function
+        function showError(message) {
+            const errorDiv = document.getElementById('error-message');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            console.error(message);
+        }
+
+        // Scene setup
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.getElementById('container').appendChild(renderer.domElement);
 
-        // Create a basic head geometry
-        const geometry = new THREE.SphereGeometry(2, 32, 32);
-        const material = new THREE.MeshPhongMaterial({ 
-            color: 0xcccccc,
-            flatShading: true
-        });
-        const head = new THREE.Mesh(geometry, material);
-        scene.add(head);
+        const headGroup = new THREE.Group();
+        scene.add(headGroup);
 
-        // Add lighting
         const light = new THREE.DirectionalLight(0xffffff, 1);
         light.position.set(5, 5, 5);
         scene.add(light);
         const ambientLight = new THREE.AmbientLight(0x404040);
         scene.add(ambientLight);
 
-        // Position camera
         camera.position.z = 6;
-
-        // Variables for rotation handling
-        let rotationSpeed = 0;
-        const maxRotationSpeed = 0.15;
-        const damping = 0.98;
 
         // Color arrays for gradient generation
         const colorSets = [
@@ -76,22 +89,15 @@
         // Gradient handling
         const gradientContainer = document.getElementById('gradient-container');
         let currentColorIndex = 0;
-        let accumulatedScroll = 0;
         let lastUpdateTime = Date.now();
-        
-        function updateGradient(scrollAmount) {
-            // Only update colors if there's significant scroll movement
-            if (Math.abs(scrollAmount) > 50) {
-                // Determine direction of color change
-                const direction = Math.sign(scrollAmount);
-                
-                // Update color index
+
+        function updateGradient(movement) {
+            const currentTime = Date.now();
+            if (currentTime - lastUpdateTime > 500 && Math.abs(movement) > 50) {
+                const direction = Math.sign(movement);
                 currentColorIndex = (currentColorIndex + direction + colorSets.length) % colorSets.length;
                 
-                // Get current color set
                 const colors = colorSets[currentColorIndex];
-                
-                // Create stable gradient
                 const gradient = `linear-gradient(
                     45deg,
                     ${colors[0]} 0%,
@@ -99,78 +105,141 @@
                 )`;
                 
                 gradientContainer.style.background = gradient;
-                
-                // Reset accumulated scroll
-                accumulatedScroll = 0;
+                lastUpdateTime = currentTime;
             }
         }
 
-        // Handle wheel events for smooth infinite scrolling
-        let velocity = 0;
-        const velocityDamping = 0.95;
-        const scrollSensitivity = 0.03;
+        // Model loading with more detailed error handling
+        const loader = new THREE.GLTFLoader();
+        
+        // Log the current URL for debugging
+        const currentUrl = window.location.href;
+        console.log('Current URL:', currentUrl);    
+        
+        // Try to fetch the file first to check if it exists
+        fetch('HEAD.glb')
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                console.log('GLB file found, attempting to load...');
+                
+                loader.load(
+                    'HEAD.glb',
+                    function(gltf) {
+                        console.log('Model loaded successfully');
+                        const box = new THREE.Box3().setFromObject(gltf.scene);
+                        const center = box.getCenter(new THREE.Vector3());
+                        const size = box.getSize(new THREE.Vector3());
+                        
+                        const maxDim = Math.max(size.x, size.y, size.z);
+                        const scale = 4 / maxDim;
+                        gltf.scene.scale.multiplyScalar(scale);
+                        
+                        gltf.scene.position.sub(center.multiplyScalar(scale));
+                        
+                        headGroup.add(gltf.scene);
+                    },
+                    function(xhr) {
+                        console.log((xhr.loaded / xhr.total * 100) + '% loaded');
+                    },
+                    function(error) {
+                        showError('Error loading model: ' + error.message);
+                    }
+                );
+            })
+            .catch(error => {
+                showError('Error fetching GLB file: ' + error.message);
+            });
 
-        window.addEventListener('wheel', (event) => {
-            event.preventDefault();
-            velocity += event.deltaY * scrollSensitivity;
-            rotationSpeed = -velocity * 0.003;
-            
-            // Accumulate scroll amount
-            accumulatedScroll += event.deltaY;
-            
-            // Only update gradient if enough time has passed
-            const currentTime = Date.now();
-            if (currentTime - lastUpdateTime > 500) {  // 500ms minimum between updates
-                updateGradient(accumulatedScroll);
-                lastUpdateTime = currentTime;
+        // Rotation handling
+        let rotationVelocityX = 0;
+        let rotationVelocityY = 0;
+        const damping = 0.98;
+        const sensitivity = 0.005;
+
+        // Mouse interaction handling
+        let isDragging = false;
+        let previousMousePosition = {
+            x: 0,
+            y: 0
+        };
+
+        document.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            previousMousePosition = {
+                x: e.clientX,
+                y: e.clientY
+            };
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+                const deltaMove = {
+                    x: e.clientX - previousMousePosition.x,
+                    y: e.clientY - previousMousePosition.y
+                };
+
+                rotationVelocityX = deltaMove.y * sensitivity;
+                rotationVelocityY = deltaMove.x * sensitivity;
+
+                updateGradient(Math.abs(deltaMove.x) > Math.abs(deltaMove.y) ? deltaMove.x : deltaMove.y);
+
+                previousMousePosition = {
+                    x: e.clientX,
+                    y: e.clientY
+                };
             }
-        }, { passive: false });
+        });
 
-        // Touch handling for mobile devices
-        let lastTouchY = 0;
-        let touchVelocity = 0;
+        document.addEventListener('mouseup', () => {
+            isDragging = false;
+        });
 
-        window.addEventListener('touchstart', (event) => {
-            lastTouchY = event.touches[0].clientY;
-        }, { passive: false });
+        // Touch interaction handling
+        let previousTouchPosition = {
+            x: 0,
+            y: 0
+        };
 
-        window.addEventListener('touchmove', (event) => {
-            event.preventDefault();
-            const touchY = event.touches[0].clientY;
-            const deltaY = lastTouchY - touchY;
-            lastTouchY = touchY;
-            
-            velocity += deltaY * scrollSensitivity * 2;
-            rotationSpeed = -velocity * 0.003;
-            
-            // Accumulate scroll amount
-            accumulatedScroll += deltaY;
-            
-            // Only update gradient if enough time has passed
-            const currentTime = Date.now();
-            if (currentTime - lastUpdateTime > 500) {
-                updateGradient(accumulatedScroll);
-                lastUpdateTime = currentTime;
-            }
+        document.addEventListener('touchstart', (e) => {
+            previousTouchPosition = {
+                x: e.touches[0].clientX,
+                y: e.touches[0].clientY
+            };
+        });
+
+        document.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const deltaMove = {
+                x: touch.clientX - previousTouchPosition.x,
+                y: touch.clientY - previousTouchPosition.y
+            };
+
+            rotationVelocityX = deltaMove.y * sensitivity;
+            rotationVelocityY = deltaMove.x * sensitivity;
+
+            updateGradient(Math.abs(deltaMove.x) > Math.abs(deltaMove.y) ? deltaMove.x : deltaMove.y);
+
+            previousTouchPosition = {
+                x: touch.clientX,
+                y: touch.clientY
+            };
         }, { passive: false });
 
         // Animation loop
         function animate() {
             requestAnimationFrame(animate);
-
-            velocity *= velocityDamping;
-            head.rotation.y += rotationSpeed;
-            rotationSpeed *= damping;
-
+            
+            headGroup.rotation.x += rotationVelocityX;
+            headGroup.rotation.y += rotationVelocityY;
+            
+            rotationVelocityX *= damping;
+            rotationVelocityY *= damping;
+            
             renderer.render(scene, camera);
         }
-
-        // Handle window resize
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        });
 
         // Initialize with first gradient
         const initialColors = colorSets[0];
@@ -179,7 +248,8 @@
             ${initialColors[0]} 0%,
             ${initialColors[1]} 100%
         )`;
-        
+
+        // Start animation
         animate();
     </script>
 </body>
