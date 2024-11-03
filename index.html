@@ -6,7 +6,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
     <style>
-        /* Previous styles remain the same */
         body {
             margin: 0;
             overflow: hidden;
@@ -61,20 +60,9 @@
         @keyframes spin {
             100% { transform: rotate(360deg); }
         }
-        #debug {
-            position: fixed;
-            top: 10px;
-            left: 10px;
-            background: rgba(0, 0, 0, 0.7);
-            color: white;
-            padding: 10px;
-            font-family: monospace;
-            z-index: 1000;
-        }
     </style>
 </head>
 <body>
-    <div id="debug"></div>
     <div id="loading">
         <div class="spinner"></div>
         <div id="loading-text">Loading 3D Model...</div>
@@ -84,19 +72,10 @@
     <div id="container"></div>
 
     <script>
-        const debug = document.getElementById('debug');
-        function log(message) {
-            console.log(message);
-            debug.innerHTML += message + '<br>';
-        }
-
         // Scene setup
         const scene = new THREE.Scene();
-        log('Scene created');
-
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         camera.position.z = 6;
-        log('Camera setup complete');
 
         const renderer = new THREE.WebGLRenderer({ 
             antialias: true, 
@@ -106,7 +85,6 @@
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(window.devicePixelRatio);
         document.getElementById('container').appendChild(renderer.domElement);
-        log('Renderer setup complete');
 
         // Lighting setup
         const frontLight = new THREE.DirectionalLight(0xffffff, 2);
@@ -115,65 +93,149 @@
 
         const ambientLight = new THREE.AmbientLight(0xffffff, 1);
         scene.add(ambientLight);
-        log('Lighting setup complete');
 
         // Model container
         const headGroup = new THREE.Group();
         scene.add(headGroup);
 
+        // Color arrays for gradient generation
+        const colorSets = [
+            ['#4A90E2', '#50E3C2'],
+            ['#FF6B6B', '#4ECDC4'],
+            ['#A8E6CF', '#DCEDC1'],
+            ['#FFD93D', '#FF6B6B'],
+            ['#6C5B7B', '#355C7D']
+        ];
+
+        // Gradient handling
+        const gradientContainer = document.getElementById('gradient-container');
+        let currentColorIndex = 0;
+        let lastUpdateTime = Date.now();
+
+        function updateGradient(movement) {
+            const currentTime = Date.now();
+            if (currentTime - lastUpdateTime > 500 && Math.abs(movement) > 50) {
+                const direction = Math.sign(movement);
+                currentColorIndex = (currentColorIndex + direction + colorSets.length) % colorSets.length;
+                
+                const colors = colorSets[currentColorIndex];
+                const gradient = `linear-gradient(
+                    45deg,
+                    ${colors[0]} 0%,
+                    ${colors[1]} 100%
+                )`;
+                
+                gradientContainer.style.background = gradient;
+                document.querySelector('meta[name="theme-color"]').setAttribute('content', colors[0]);
+                lastUpdateTime = currentTime;
+            }
+        }
+
         // Load the model
-        log('Starting model load...');
+        console.log('Starting model load...');
         const loader = new THREE.GLTFLoader();
         
         loader.load(
             'HEAD.glb',
             function(gltf) {
-                log('Model loaded, processing...');
-                
-                // Add to scene first
+                console.log('Model loaded successfully');
                 headGroup.add(gltf.scene);
-                log('Model added to scene');
 
-                // Then calculate bounds and adjust
                 const box = new THREE.Box3().setFromObject(gltf.scene);
                 const center = box.getCenter(new THREE.Vector3());
                 const size = box.getSize(new THREE.Vector3());
-                log(`Model size: ${size.x}, ${size.y}, ${size.z}`);
                 
                 const maxDim = Math.max(size.x, size.y, size.z);
                 const scale = 4 / maxDim;
                 gltf.scene.scale.multiplyScalar(scale);
                 
                 gltf.scene.position.sub(center.multiplyScalar(scale));
-                log('Model positioned and scaled');
 
-                // Hide loading screen
                 document.getElementById('loading').classList.add('hidden');
-                log('Loading complete');
-
-                // Force a render
                 renderer.render(scene, camera);
             },
             function(xhr) {
                 if (xhr.lengthComputable) {
                     const percentComplete = (xhr.loaded / xhr.total * 100).toFixed(0);
                     document.getElementById('loading-progress').textContent = `${percentComplete}%`;
-                    log(`Loading progress: ${percentComplete}%`);
                 }
             },
             function(error) {
-                log('Error loading model: ' + error);
+                console.error('Error loading model:', error);
                 document.getElementById('loading').classList.add('hidden');
             }
         );
 
-        // Animation
+        // Rotation handling
         let rotationVelocityX = 0;
         let rotationVelocityY = 0;
         const damping = 0.98;
         const sensitivity = 0.005;
         let isAutoRotating = true;
         const autoRotationSpeed = -0.005;
+
+        // Interaction handling
+        let isDragging = false;
+        let previousMousePosition = { x: 0, y: 0 };
+
+        document.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            isAutoRotating = false;
+            previousMousePosition = {
+                x: e.clientX,
+                y: e.clientY
+            };
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+                const deltaMove = {
+                    x: e.clientX - previousMousePosition.x,
+                    y: e.clientY - previousMousePosition.y
+                };
+
+                rotationVelocityX = deltaMove.y * sensitivity;
+                rotationVelocityY = deltaMove.x * sensitivity;
+
+                updateGradient(Math.abs(deltaMove.x) > Math.abs(deltaMove.y) ? deltaMove.x : deltaMove.y);
+
+                previousMousePosition = {
+                    x: e.clientX,
+                    y: e.clientY
+                };
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            isDragging = false;
+        });
+
+        // Touch interaction handling
+        document.addEventListener('touchstart', (e) => {
+            isAutoRotating = false;
+            previousMousePosition = {
+                x: e.touches[0].clientX,
+                y: e.touches[0].clientY
+            };
+        });
+
+        document.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            const deltaMove = {
+                x: e.touches[0].clientX - previousMousePosition.x,
+                y: e.touches[0].clientY - previousMousePosition.y
+            };
+
+            rotationVelocityX = deltaMove.y * sensitivity;
+            rotationVelocityY = deltaMove.x * sensitivity;
+
+            updateGradient(Math.abs(deltaMove.x) > Math.abs(deltaMove.y) ? deltaMove.x : deltaMove.y);
+
+            previousMousePosition = {
+                x: e.touches[0].clientX,
+                y: e.touches[0].clientY
+            };
+        }, { passive: false });
 
         // Animation loop
         function animate() {
@@ -196,10 +258,15 @@
             renderer.render(scene, camera);
         }
 
-        animate();
-        log('Animation loop started');
+        // Initialize with first gradient
+        const initialColors = colorSets[0];
+        gradientContainer.style.background = `linear-gradient(
+            45deg,
+            ${initialColors[0]} 0%,
+            ${initialColors[1]} 100%
+        )`;
 
-        // [Previous interaction code remains the same]
+        animate();
     </script>
 </body>
 </html>
